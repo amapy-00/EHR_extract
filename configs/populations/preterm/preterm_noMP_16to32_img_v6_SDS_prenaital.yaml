@@ -14,13 +14,13 @@ defaults:
   - _self_
 
 paths:
-  input_dir_SDS: /storage/archive/UCPH/DeepFetal/SDS/registers_pseudonymized
-  output_dir: ${oc.env:EHR_EXTRACT_OUTPUTS}/${hydra:job.config_name}
-  population_save_path: ${paths.output_dir}/${hydra:job.config_name}_population
-  discards_save_path: ${paths.output_dir}/${hydra:job.config_name}_discards
-  holdout_csv: /projects/users/data/UCPH/DeepFetal/projects/common/splits/split_V4/test_split_0.15_2026-06-08.csv
-  img_sequence_predictions: /projects/users/data/UCPH/DeepFetal/projects/common/cervix_classification/cervix_preds_v3.csv
-  imaging_table: /projects/users/data/UCPH/DeepFetal/ultrasound/tables/database_snapshots/all_images_2026-08-24.csv
+  input_dir_SDS: /home/am/data/raw/sds
+  output_dir: /home/am/Documents/output_cohort/${hydra:job.config_name}
+  population_save_path: /home/am/Documents/output_cohort/${hydra:job.config_name}_population
+  discards_save_path: /home/am/Documents/output_cohort/${hydra:job.config_name}_discards
+  holdout_csv: #/projects/users/data/UCPH/DeepFetal/projects/common/splits/split_V4/test_split_0.15_2026-06-08.csv
+  img_sequence_predictions: /home/am/data/raw/research_common/cervix_preds_v3.csv
+  imaging_table: /home/am/Documents/DeepFetalCSVs/DeepFetal_image_database_250526_joined_on_sop_instance_uid.csv
 
 strict: True
 preterm_cutoff: 259  # == 37 weeks. Used by the C-section and induction criteria. Every birth that
@@ -704,7 +704,7 @@ conditional_criteria:
 imaging_table:
   table: ${paths.imaging_table}
   columns:
-    CPR_MOR: phair_hash
+    CPR_MOR: file_hash
     FILE_PATH: file_path
     STUDY_DATE: study_date
     PDX: physical_delta_x
