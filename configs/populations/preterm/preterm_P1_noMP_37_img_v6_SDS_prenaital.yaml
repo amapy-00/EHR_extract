@@ -727,6 +727,7 @@ imaging_table:
     PDX: physical_delta_x
     PDY: physical_delta_y
     NO_OCR_FILE_PATH: no_ocr_preprocessed_file_path
+    INSTITUTION: institution_name
 
 
 imaging_matching_criteria:
