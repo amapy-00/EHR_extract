@@ -1,0 +1,76 @@
+# =====================================================================================
+# steps_SDS_2_live
+# Step-by-step cohort size: SDS data only, NO image filtering, NO GA-range criterion.
+# Step 2 of 5. Criteria applied (cumulative, in this order):
+#   1. GA available at birth
+#   2. Only live births
+# Run: python EHR_extract/extract.py --config-name steps_SDS_2_live
+# =====================================================================================
+# @package _global_
+defaults:
+  - /default@
+  - _self_
+
+paths:
+  input_dir_SDS: /home/am/data/raw/sds
+  output_dir: /home/am/Documents/output_cohort/filtering_steps_SDS/${hydra:job.config_name}
+  population_save_path: /home/am/Documents/output_cohort/filtering_steps_SDS/${hydra:job.config_name}_population
+  discards_save_path: /home/am/Documents/output_cohort/filtering_steps_SDS/${hydra:job.config_name}_discards
+  holdout_csv: 
+
+strict: True
+preterm_cutoff: 259  # == 37 weeks. Used by the C-section and induction criteria.
+
+population: 
+  population_key: CPR_BARN
+  split_key: CPR_MOR
+  file_path_key: FILE_PATH
+  deduplication_key: CPR_BARN
+  tables: 
+    - table: ${paths.input_dir_SDS}/mfr.csv
+      columns:
+        CPR_BARN: CPR_BARN
+        CPR_MOR: CPR_MODER
+        GA: GESTATIONSALDER_DAGE
+        BIRTHDAY: FOEDSELSDATO
+    - table: ${paths.input_dir_SDS}/nyfoedte.csv
+      columns:
+        CPR_BARN: CPRnummer_Barn
+        CPR_MOR: CPRnummer_Mor
+        GA: Gestationsalder
+        BIRTHDAY: FoedselsDato_Barn
+
+conditional_criteria:
+  # ======================================================================================
+  # CRITERION 1/2: GA available at birth  (1 OR-group, action: exclude)
+  # ======================================================================================
+  # GA available at birth
+  - action: exclude
+    conditions: 
+      # --- [1.1] OR-group 1/1: population: GA missing
+      - standard:
+        table: population
+        match_on: CPR_BARN
+        column: GA
+        operator: "missing"
+        value: 
+  # ======================================================================================
+  # CRITERION 2/2: Only live births  (2 OR-groups, action: exclude)
+  # ======================================================================================
+  # Only live birth (no SP)
+  - action: exclude
+    conditions:
+      # --- [2.1] OR-group 1/2: mfr: not live-born
+      - standard:
+        table: ${paths.input_dir_SDS}/mfr.csv
+        match_on: CPR_BARN
+        column: LEVENDE_ELLER_DOEDFOEDT
+        operator: "!="
+        value: Levendefødt  # == live birth
+      # --- [2.2] OR-group 2/2: nyfoedte: not live-born (1 = live)
+      - standard: or
+        table: ${paths.input_dir_SDS}/nyfoedte.csv
+        match_on: CPRnummer_Barn
+        column: LevendefoedtDoedfoedt  # == live-born/still-born
+        operator: "!="
+        value: "1"
