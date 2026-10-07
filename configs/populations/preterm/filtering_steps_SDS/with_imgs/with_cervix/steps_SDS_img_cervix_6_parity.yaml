@@ -1,0 +1,67 @@
+# =====================================================================================
+# steps_SDS_img_cervix_6_parity
+# Cervix filter on the image CSV of steps_SDS_img_6_parity.
+# Input: steps_SDS_img_6_parity_population_train_and_test.csv (one row per child-image pair, images taken
+# during the pregnancy). Nothing is recomputed: no register criteria, no image pairing.
+# Register criteria already applied in that population:
+#   1. GA available at birth
+#   2. Only live births
+#   3. No iatrogenic preterm C-section
+#   4. No iatrogenic preterm induction
+#   5. No multiple births
+#   6. First birth only (parity 1 in SDS)
+# Here: keep only images the cervix classifier labels as cervix (is_cervix = 1).
+# Run: python EHR_extract/extract.py --config-name steps_SDS_img_cervix_6_parity
+# Change the input folder with:  ... --config-name steps_SDS_img_cervix_6_parity img_csv_dir=/other/folder
+# =====================================================================================
+# @package _global_
+defaults:
+  - /default@
+  - _self_
+
+# Folder that contains the image CSVs (steps_SDS_img_*_population_train_and_test.csv)
+img_csv_dir: /home/am/Documents/output_cohort/filtering_steps_SDS/with_images
+
+paths:
+  output_dir: /home/am/Documents/output_cohort/filtering_steps_SDS/with_images/with_cervix/${hydra:job.config_name}
+  population_save_path: /home/am/Documents/output_cohort/filtering_steps_SDS/with_images/with_cervix/${hydra:job.config_name}_population
+  discards_save_path: /home/am/Documents/output_cohort/filtering_steps_SDS/with_images/with_cervix/${hydra:job.config_name}_discards
+  holdout_csv: 
+  img_sequence_predictions: /home/am/data/raw/research_common/cervix_preds_v3.csv
+ 
+strict: True
+
+population:
+  population_key: CPR_BARN
+  split_key: CPR_MOR
+  file_path_key: FILE_PATH
+  # null = keep every child-image row (one child has several images, so no deduplication)
+  deduplication_key: null
+  tables:
+    - table: ${img_csv_dir}/steps_SDS_img_6_parity_population_train_and_test.csv
+      columns:
+        CPR_BARN: CPR_BARN
+        CPR_MOR: CPR_MOR
+        GA: GA
+        BIRTHDAY: BIRTHDAY
+        FILE_PATH: FILE_PATH
+        STUDY_DATE: STUDY_DATE
+        PDX: PDX
+        PDY: PDY
+        NO_OCR_FILE_PATH: NO_OCR_FILE_PATH
+        INSTITUTION_NAME: INSTITUTION_NAME
+
+# Register criteria are already applied in the input CSV.
+conditional_criteria: []
+
+# No imaging_table: the images are already paired in the input CSV.
+
+imaging_matching_criteria:
+  # Only images classified as cervix
+  - function: find_images_with_predicted_classes
+    args:
+      table: ${paths.img_sequence_predictions}
+      classes: [1]
+      image_path_column: file_path
+      class_column: is_cervix
+      population_image_path_column: ${population.file_path_key}

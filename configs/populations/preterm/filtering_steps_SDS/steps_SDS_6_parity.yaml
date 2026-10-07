@@ -1,14 +1,14 @@
 # =====================================================================================
-# steps_SDS_6_multiples
+# steps_SDS_6_parity
 # Step-by-step cohort size: SDS data only, NO image filtering, NO GA-range criterion.
 # Step 6 of 6. Criteria applied (cumulative, in this order):
 #   1. GA available at birth
 #   2. Only live births
 #   3. No iatrogenic preterm C-section
 #   4. No iatrogenic preterm induction
-#   5. First birth only (parity 1 in SDS)
-#   6. No multiple births
-# Run: python EHR_extract/extract.py --config-name steps_SDS_6_multiples
+#   5. No multiple births
+#   6. First birth only (parity 1 in SDS)
+# Run: python EHR_extract/extract.py --config-name steps_SDS_6_parity
 # =====================================================================================
 # @package _global_
 defaults:
@@ -654,35 +654,12 @@ conditional_criteria:
           population_child_cpr_column: CPR_BARN
           population_mom_cpr_column: CPR_MOR
   # ======================================================================================
-  # CRITERION 5/6: Only first pregnancy (parity 1)  (2 OR-groups, action: exclude)
-  # ======================================================================================
-  # Only first pregnancy 
-  # First birth only (nulliparous, i.e. parity 0 before this birth).
-  # In SDS this is coded as 1 (= this is the woman's 1st birth), so anything other than 1 is excluded.
-  # NB: `!=` never matches empty cells, so children with no parity recorded are KEPT; "." is excluded.
-  - action: exclude
-    conditions:
-      # --- [5.1] OR-group 1/2: mfr: PARITET != 1
-      - standard:
-        table: ${paths.input_dir_SDS}/mfr.csv
-        match_on: CPR_BARN
-        column: PARITET
-        operator: "!="
-        value: "1"
-      # --- [5.2] OR-group 2/2: nyfoedte: Paritet != 1
-      - standard: or
-        table: ${paths.input_dir_SDS}/nyfoedte.csv
-        match_on: CPRnummer_Barn
-        column: Paritet
-        operator: "!="
-        value: "1"
-  # ======================================================================================
-  # CRITERION 6/6: No multiple births  (2 OR-groups, action: exclude)
+  # CRITERION 5/6: No multiple births  (2 OR-groups, action: exclude)
   # ======================================================================================
   # Remove multiple births (twins etc.)
   - action: exclude
     conditions:
-      # --- [6.1] OR-group 1/2: nyfoedte: twins (shared DW_EK_Foedsel + mother)
+      # --- [5.1] OR-group 1/2: nyfoedte: twins (shared DW_EK_Foedsel + mother)
       - custom:
         function: find_duplicated_ids
         args: 
@@ -691,7 +668,7 @@ conditional_criteria:
           id_columns: 
           - DW_EK_Foedsel
           - CPRnummer_Mor
-      # --- [6.2] OR-group 2/2: mfr: twins (shared FOEDSELSLOEBENUMMER + mother)
+      # --- [5.2] OR-group 2/2: mfr: twins (shared FOEDSELSLOEBENUMMER + mother)
       - custom: or
         function: find_duplicated_ids
         args: 
@@ -700,3 +677,26 @@ conditional_criteria:
           id_columns: 
           - FOEDSELSLOEBENUMMER
           - CPR_MODER
+  # ======================================================================================
+  # CRITERION 6/6: Only first pregnancy (parity 1)  (2 OR-groups, action: exclude)
+  # ======================================================================================
+  # Only first pregnancy 
+  # First birth only (nulliparous, i.e. parity 0 before this birth).
+  # In SDS this is coded as 1 (= this is the woman's 1st birth), so anything other than 1 is excluded.
+  # NB: `!=` never matches empty cells, so children with no parity recorded are KEPT; "." is excluded.
+  - action: exclude
+    conditions:
+      # --- [6.1] OR-group 1/2: mfr: PARITET != 1
+      - standard:
+        table: ${paths.input_dir_SDS}/mfr.csv
+        match_on: CPR_BARN
+        column: PARITET
+        operator: "!="
+        value: "1"
+      # --- [6.2] OR-group 2/2: nyfoedte: Paritet != 1
+      - standard: or
+        table: ${paths.input_dir_SDS}/nyfoedte.csv
+        match_on: CPRnummer_Barn
+        column: Paritet
+        operator: "!="
+        value: "1"
