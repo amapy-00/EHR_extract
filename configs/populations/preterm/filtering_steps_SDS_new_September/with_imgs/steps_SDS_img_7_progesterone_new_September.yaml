@@ -1,20 +1,21 @@
 # =====================================================================================
 # DATASET: new_September  ->  results in /home/am/Documents/output_cohort/filtering_steps_SDS/new_September
-# steps_SDS_img_6_parity_new_September
-# Image pairing for the population of steps_SDS_6_parity_new_September.
-# The population is loaded from the saved output of steps_SDS_6_parity_new_September, so the register criteria
+# steps_SDS_img_7_progesterone_new_September
+# Image pairing for the population of steps_SDS_7_progesterone_new_September.
+# The population is loaded from the saved output of steps_SDS_7_progesterone_new_September, so the register criteria
 # are NOT recomputed. Criteria already applied in that population:
 #   1. GA available at birth
 #   2. Only live births
 #   3. No iatrogenic preterm C-section
 #   4. No iatrogenic preterm induction
 #   5. No multiple births
-#   6. First birth only (parity 1 in SDS)
+#   6. No cervical cerclage
+#   7. No progesterone treatment
 # Here: each child is paired with all of the mother's ultrasound images taken during that
 # pregnancy (birth date - GA up to birth date). No GA-at-scan or cervix filtering: those are
 # counted afterwards by image_step_summary.py.
-# Prerequisite: steps_SDS_6_parity_new_September has been run. Re-run this config whenever steps_SDS_6_parity_new_September changes.
-# Run: python EHR_extract/extract.py --config-name steps_SDS_img_6_parity_new_September
+# Prerequisite: steps_SDS_7_progesterone_new_September has been run. Re-run this config whenever steps_SDS_7_progesterone_new_September changes.
+# Run: python EHR_extract/extract.py --config-name steps_SDS_img_7_progesterone_new_September
 # =====================================================================================
 # @package _global_
 defaults:
@@ -37,7 +38,7 @@ population:
   file_path_key: FILE_PATH
   deduplication_key: CPR_BARN
   tables:
-    - table: /home/am/Documents/output_cohort/filtering_steps_SDS/new_September/steps_SDS_6_parity_new_September_population_train_and_test.csv
+    - table: /home/am/Documents/output_cohort/filtering_steps_SDS/new_September/steps_SDS_7_progesterone_new_September_population_train_and_test.csv
       columns:
         CPR_BARN: CPR_BARN
         CPR_MOR: CPR_MOR

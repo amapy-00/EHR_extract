@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Register steps (no images): criteria 1-6 applied one by one (6 = first birth / parity).
+# Register steps (no images): criteria 1-8 applied one by one (6 = cerclage, 7 = progesterone, 8 = first birth / parity).
 # Dataset: new_September   Results: /home/am/Documents/output_cohort/filtering_steps_SDS/new_September
 # Run from anywhere:  bash run_steps_new_September.sh   (this script must be in the repo root, next to EHR_extract/)
 # Existing results with the same names are OVERWRITTEN.
@@ -27,7 +27,13 @@ python EHR_extract/extract.py --config-name steps_SDS_4_induction_new_September
 echo ">>> steps_SDS_5_multiples_new_September"
 python EHR_extract/extract.py --config-name steps_SDS_5_multiples_new_September
 
-echo ">>> steps_SDS_6_parity_new_September"
-python EHR_extract/extract.py --config-name steps_SDS_6_parity_new_September
+echo ">>> steps_SDS_6_cerclage_new_September"
+python EHR_extract/extract.py --config-name steps_SDS_6_cerclage_new_September
+
+echo ">>> steps_SDS_7_progesterone_new_September"
+python EHR_extract/extract.py --config-name steps_SDS_7_progesterone_new_September
+
+echo ">>> steps_SDS_8_parity_new_September"
+python EHR_extract/extract.py --config-name steps_SDS_8_parity_new_September
 
 echo "Done. Results in: /home/am/Documents/output_cohort/filtering_steps_SDS/new_September"

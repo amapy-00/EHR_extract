@@ -1,8 +1,8 @@
 # =====================================================================================
 # DATASET: new_September  ->  results in /home/am/Documents/output_cohort/filtering_steps_SDS/new_September
-# steps_SDS_img_cervix_6_parity_new_September
-# Cervix filter on the image CSV of steps_SDS_img_6_parity_new_September.
-# Input: steps_SDS_img_6_parity_new_September_population_train_and_test.csv (one row per child-image pair, images taken
+# steps_SDS_img_cervix_8_parity_new_September
+# Cervix filter on the image CSV of steps_SDS_img_8_parity_new_September.
+# Input: steps_SDS_img_8_parity_new_September_population_train_and_test.csv (one row per child-image pair, images taken
 # during the pregnancy). Nothing is recomputed: no register criteria, no image pairing.
 # Register criteria already applied in that population:
 #   1. GA available at birth
@@ -10,10 +10,12 @@
 #   3. No iatrogenic preterm C-section
 #   4. No iatrogenic preterm induction
 #   5. No multiple births
-#   6. First birth only (parity 1 in SDS)
+#   6. No cervical cerclage
+#   7. No progesterone treatment
+#   8. First birth only (parity 1 in SDS)
 # Here: keep only images the cervix classifier labels as cervix (is_cervix = 1).
-# Run: python EHR_extract/extract.py --config-name steps_SDS_img_cervix_6_parity_new_September
-# Change the input folder with:  ... --config-name steps_SDS_img_cervix_6_parity_new_September img_csv_dir=/other/folder
+# Run: python EHR_extract/extract.py --config-name steps_SDS_img_cervix_8_parity_new_September
+# Change the input folder with:  ... --config-name steps_SDS_img_cervix_8_parity_new_September img_csv_dir=/other/folder
 # =====================================================================================
 # @package _global_
 defaults:
@@ -39,7 +41,7 @@ population:
   # null = keep every child-image row (one child has several images, so no deduplication)
   deduplication_key: null
   tables:
-    - table: ${img_csv_dir}/steps_SDS_img_6_parity_new_September_population_train_and_test.csv
+    - table: ${img_csv_dir}/steps_SDS_img_8_parity_new_September_population_train_and_test.csv
       columns:
         CPR_BARN: CPR_BARN
         CPR_MOR: CPR_MOR

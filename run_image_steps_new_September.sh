@@ -28,7 +28,13 @@ python EHR_extract/extract.py --config-name steps_SDS_img_4_induction_new_Septem
 echo ">>> steps_SDS_img_5_multiples_new_September"
 python EHR_extract/extract.py --config-name steps_SDS_img_5_multiples_new_September
 
-echo ">>> steps_SDS_img_6_parity_new_September"
-python EHR_extract/extract.py --config-name steps_SDS_img_6_parity_new_September
+echo ">>> steps_SDS_img_6_cerclage_new_September"
+python EHR_extract/extract.py --config-name steps_SDS_img_6_cerclage_new_September
+
+echo ">>> steps_SDS_img_7_progesterone_new_September"
+python EHR_extract/extract.py --config-name steps_SDS_img_7_progesterone_new_September
+
+echo ">>> steps_SDS_img_8_parity_new_September"
+python EHR_extract/extract.py --config-name steps_SDS_img_8_parity_new_September
 
 echo "Done. Results in: /home/am/Documents/output_cohort/filtering_steps_SDS/new_September/with_images"

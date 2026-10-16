@@ -28,7 +28,13 @@ python EHR_extract/extract.py --config-name steps_SDS_img_cervix_4_induction_new
 echo ">>> steps_SDS_img_cervix_5_multiples_new_September"
 python EHR_extract/extract.py --config-name steps_SDS_img_cervix_5_multiples_new_September
 
-echo ">>> steps_SDS_img_cervix_6_parity_new_September"
-python EHR_extract/extract.py --config-name steps_SDS_img_cervix_6_parity_new_September
+echo ">>> steps_SDS_img_cervix_6_cerclage_new_September"
+python EHR_extract/extract.py --config-name steps_SDS_img_cervix_6_cerclage_new_September
+
+echo ">>> steps_SDS_img_cervix_7_progesterone_new_September"
+python EHR_extract/extract.py --config-name steps_SDS_img_cervix_7_progesterone_new_September
+
+echo ">>> steps_SDS_img_cervix_8_parity_new_September"
+python EHR_extract/extract.py --config-name steps_SDS_img_cervix_8_parity_new_September
 
 echo "Done. Results in: /home/am/Documents/output_cohort/filtering_steps_SDS/new_September/with_images/with_cervix"
