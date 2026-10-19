@@ -49,7 +49,7 @@ population:
 
 # Prescription register (epikur_1/2/3.csv) - column names used by the progesterone criterion.
 # Check them with:  head -1 /home/am/data/raw/sds/epikur_1.csv
-epikur_mother_column: pnr      # mother's pseudonymised CPR (same IDs as CPR_MODER / CPRnummer_Mor)
+epikur_mother_column: cpr      # mother's pseudonymised CPR (same IDs as CPR_MODER / CPRnummer_Mor)
 epikur_date_column: eksd       # date the prescription was dispensed (format YYYY-MM-DD)
 
 conditional_criteria:
