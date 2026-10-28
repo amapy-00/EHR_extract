@@ -1,0 +1,897 @@
+# =====================================================================================
+# preterm_P1_noMP_37_img_cervix_SDS        (DATASET: new_September)
+# Whole cohort in ONE run - gives the same result as the step chain
+#   steps_SDS_7_progesterone_new_September -> steps_SDS_img_7_progesterone_new_September
+#   -> steps_SDS_img_cervix_7_progesterone_new_September
+# Criteria (in this order):
+#   1. GA available at birth
+#   2. Only live births
+#   3. No iatrogenic preterm C-section
+#   4. No iatrogenic preterm induction
+#   5. No multiple births
+#   6. No cervical cerclage
+#   7. No progesterone treatment
+# Then: pair every child with the mother's ultrasound images taken during the pregnancy
+#       (mother ID = phair_hash), and keep only images classified as cervix.
+# NOT applied here (despite "16to32" in the name): no GA-at-birth or GA-at-scan filter, and no
+# parity criterion - exactly like the step chain. GA filtering is done afterwards (check_image_files.py).
+# Results:  /home/am/Documents/output_cohort/filtering_steps_SDS/new_September/
+#           preterm_P1_noMP_37_img_cervix_SDS_population_train_and_test.csv  (one row per child-image)
+#           preterm_P1_noMP_37_img_cervix_SDS_discards                         (counts per criterion)
+# Run: python EHR_extract/extract.py --config-name preterm_P1_noMP_37_img_cervix_SDS
+# =====================================================================================
+# @package _global_
+defaults:
+  - /default@
+  - _self_
+
+paths:
+  input_dir_SDS: /home/am/data/raw/sds
+  output_dir: /home/am/Documents/output_cohort/final_prenaital/${hydra:job.config_name}
+  population_save_path: /home/am/Documents/output_cohort/final_prenaital/${hydra:job.config_name}_population
+  discards_save_path: /home/am/Documents/output_cohort/final_prenaital/${hydra:job.config_name}_discards
+  holdout_csv: 
+  imaging_table: /home/am/Documents/DeepFetalCSVs/new_September/DeepFetal_image_database_090926_joined_on_sop_instance_uid_and_xx-file_hash.csv
+  img_sequence_predictions: /home/am/data/raw/research_common/cervix_preds_v3.csv
+
+strict: True
+preterm_cutoff: 259  # == 37 weeks. Used by the C-section and induction criteria.
+
+population: 
+  population_key: CPR_BARN
+  split_key: CPR_MOR
+  file_path_key: FILE_PATH
+  deduplication_key: CPR_BARN
+  tables: 
+    - table: ${paths.input_dir_SDS}/mfr.csv
+      columns:
+        CPR_BARN: CPR_BARN
+        CPR_MOR: CPR_MODER
+        GA: GESTATIONSALDER_DAGE
+        BIRTHDAY: FOEDSELSDATO
+    - table: ${paths.input_dir_SDS}/nyfoedte.csv
+      columns:
+        CPR_BARN: CPRnummer_Barn
+        CPR_MOR: CPRnummer_Mor
+        GA: Gestationsalder
+        BIRTHDAY: FoedselsDato_Barn
+
+# Prescription register (epikur_1/2/3.csv) - column names used by the progesterone criterion.
+# Check them with:  head -1 /home/am/data/raw/sds/epikur_1.csv
+epikur_mother_column: cpr      # mother's pseudonymised CPR (same IDs as CPR_MODER / CPRnummer_Mor)
+epikur_date_column: eksd       # date the prescription was dispensed (format YYYY-MM-DD)
+
+conditional_criteria:
+  # ======================================================================================
+  # CRITERION 1/7: GA available at birth  (1 OR-group, action: exclude)
+  # ======================================================================================
+  # GA available at birth
+  - action: exclude
+    conditions: 
+      # --- [1.1] OR-group 1/1: population: GA missing
+      - standard:
+        table: population
+        match_on: CPR_BARN
+        column: GA
+        operator: "missing"
+        value: 
+  # ======================================================================================
+  # CRITERION 2/7: Only live births  (2 OR-groups, action: exclude)
+  # ======================================================================================
+  # Only live birth (no SP)
+  - action: exclude
+    conditions:
+      # --- [2.1] OR-group 1/2: mfr: not live-born
+      - standard:
+        table: ${paths.input_dir_SDS}/mfr.csv
+        match_on: CPR_BARN
+        column: LEVENDE_ELLER_DOEDFOEDT
+        operator: "!="
+        value: Levendefødt  # == live birth
+      # --- [2.2] OR-group 2/2: nyfoedte: not live-born (1 = live)
+      - standard: or
+        table: ${paths.input_dir_SDS}/nyfoedte.csv
+        match_on: CPRnummer_Barn
+        column: LevendefoedtDoedfoedt  # == live-born/still-born
+        operator: "!="
+        value: "1"
+  # ======================================================================================
+  # CRITERION 3/7: No iatrogenic preterm C-section  (3 OR-groups, action: exclude)
+  # ======================================================================================
+  # No C-section/kejsersnit unless PPROM or Contractions or C-section during birth
+  - action: exclude
+    conditions:
+      # --- [3.1] OR-group 1/3: nyfoedte C-section (Kejsersnit != -1) AND preterm AND no PPROM/labour/intrapartum-CS code
+      - standard:
+        table: ${paths.input_dir_SDS}/nyfoedte.csv
+        match_on: CPRnummer_Barn
+        column: Kejsersnit  # == C-section
+        operator: "!="
+        value: "-1"
+      - standard: and
+        table: population
+        match_on: CPR_BARN
+        column: GA
+        operator: <
+        value: ${preterm_cutoff}
+      - custom: and 
+        function: match_value_with_child_cpr_on_birth_id
+        args:
+          value: [DO420, DO422, DO424, DO601, KMCA10D, KMCA10E]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/mor_diagnoser.csv
+          value_column: DiagnoseKode
+          # DW_EK_Foedsel: Key used to identify each individual birth. The key can be used 
+          # to link to data in the satellite tables for the mother. For reports concerning 
+          # unique births (as opposed to unique newborns), the main table must be filtered 
+          # to ‘Foedsel = 1’.
+          value_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_path: ${paths.input_dir_SDS}/nyfoedte.csv
+          mapping_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_child_cpr_column: CPRnummer_Barn
+      - custom: and 
+        function: match_value_with_child_cpr_on_birth_id
+        args:
+          value: [DO420, DO422, DO424, DO601, KMCA10D, KMCA10E]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/mor_procedurer.csv
+          value_column: ProcedureKode
+          value_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_path: ${paths.input_dir_SDS}/nyfoedte.csv
+          mapping_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_child_cpr_column: CPRnummer_Barn
+      - custom: and 
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args: 
+          value: [DO420, DO422, DO424, DO601, KMCA10D, KMCA10E]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/t_diag.csv
+          value_column: C_DIAG
+          value_id_column: V_RECNUM
+          value_time_column: D_INDDTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+      - custom: and 
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args: 
+          value: [DO420, DO422, DO424, DO601, KMCA10D, KMCA10E]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/t_diag.csv
+          value_column: C_TILDIAG
+          value_id_column: V_RECNUM
+          value_time_column: D_INDDTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+      - custom: and 
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args: 
+          value: [KMCA10D, KMCA10E]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/t_sksopr.csv
+          value_column: C_OPR
+          value_id_column: V_RECNUM
+          value_time_column: D_ODTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+      - custom: and 
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args: 
+          value: [DO420, DO422, DO424, KMCA10D, KMCA10E]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/t_sksopr.csv
+          value_column: C_TILOPR
+          value_id_column: V_RECNUM
+          value_time_column: D_ODTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+      # --- [3.2] OR-group 2/3: mfr C-section marker AND preterm AND no PPROM code
+      - standard: or
+        table: ${paths.input_dir_SDS}/mfr.csv
+        match_on: CPR_BARN
+        column: MARKOER_KEJSERSNIT
+        operator: "=="
+        value: "1"
+      - standard: and
+        table: population
+        match_on: CPR_BARN
+        column: GA
+        operator: <
+        value: ${preterm_cutoff}
+      - standard: and
+        table: ${paths.input_dir_SDS}/mfr.csv
+        match_on: CPR_BARN
+        column: PPROM
+        operator: not_in
+        value: [DO420, DO422, DO424]
+      - custom: and 
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args: 
+          value: [DO420, DO422, DO424, DO601, KMCA10D, KMCA10E]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/t_diag.csv
+          value_column: C_DIAG
+          value_id_column: V_RECNUM
+          value_time_column: D_INDDTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+      - custom: and 
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args: 
+          value: [DO420, DO422, DO424, DO601, KMCA10D, KMCA10E]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/t_diag.csv
+          value_column: C_TILDIAG
+          value_id_column: V_RECNUM
+          value_time_column: D_INDDTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+      # --- [3.3] OR-group 3/3: LPR operation code starting KMCA AND preterm AND no PPROM/labour/intrapartum-CS code
+      - custom: or
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args: 
+          value: "KMCA"
+          operator: [startswith, any]
+          value_table_path: ${paths.input_dir_SDS}/t_sksopr.csv
+          value_column: C_OPR
+          value_id_column: V_RECNUM
+          value_time_column: D_ODTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+      - standard: and
+        table: population
+        match_on: CPR_BARN
+        column: GA
+        operator: <
+        value: ${preterm_cutoff}
+      - custom: and 
+        function: match_value_with_child_cpr_on_birth_id
+        args:
+          value: [DO420, DO422, DO424, DO601, KMCA10D, KMCA10E]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/mor_diagnoser.csv
+          value_column: DiagnoseKode
+          value_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_path: ${paths.input_dir_SDS}/nyfoedte.csv
+          mapping_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_child_cpr_column: CPRnummer_Barn
+      - custom: and 
+        function: match_value_with_child_cpr_on_birth_id
+        args:
+          value: [DO420, DO422, DO424, DO601, KMCA10D, KMCA10E]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/mor_procedurer.csv
+          value_column: ProcedureKode
+          value_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_path: ${paths.input_dir_SDS}/nyfoedte.csv
+          mapping_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_child_cpr_column: CPRnummer_Barn
+      - custom: and 
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args: 
+          value: [DO420, DO422, DO424, DO601, KMCA10D, KMCA10E]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/t_diag.csv
+          value_column: C_DIAG
+          value_id_column: V_RECNUM
+          value_time_column: D_INDDTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+      - custom: and 
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args: 
+          value: [DO420, DO422, DO424, DO601, KMCA10D, KMCA10E]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/t_diag.csv
+          value_column: C_TILDIAG
+          value_id_column: V_RECNUM
+          value_time_column: D_INDDTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+      - custom: and 
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args: 
+          value: [KMCA10D, KMCA10E]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/t_sksopr.csv
+          value_column: C_OPR
+          value_id_column: V_RECNUM
+          value_time_column: D_ODTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+      - custom: and 
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args: 
+          value: [DO420, DO422, DO424, KMCA10D, KMCA10E]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/t_sksopr.csv
+          value_column: C_TILOPR
+          value_id_column: V_RECNUM
+          value_time_column: D_ODTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+  # ======================================================================================
+  # CRITERION 4/7: No iatrogenic preterm induction  (4 OR-groups, action: exclude)
+  # ======================================================================================
+  # Not induced 
+  - action: exclude
+    conditions:
+      # --- [4.1] OR-group 1/4: mfr induction marker AND preterm AND no PPROM code
+      - standard:
+        table: ${paths.input_dir_SDS}/mfr.csv
+        match_on: CPR_BARN
+        column: MARKOER_IGANGSAETTELSE  # == MARKER_INITIALIZATION
+        operator: "=="
+        value: "1"
+      - standard: and
+        table: population
+        match_on: CPR_BARN
+        column: GA
+        operator: <
+        value: ${preterm_cutoff}
+      - standard: and
+        table: ${paths.input_dir_SDS}/mfr.csv
+        match_on: CPR_BARN
+        column: PPROM
+        operator: not_in
+        value: [DO420, DO422, DO424]
+      - custom: and 
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args: 
+          value: [DO420, DO422, DO424]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/t_diag.csv
+          value_column: C_DIAG
+          value_id_column: V_RECNUM
+          value_time_column: D_INDDTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+      - custom: and 
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args: 
+          value: [DO420, DO422, DO424]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/t_diag.csv
+          value_column: C_TILDIAG
+          value_id_column: V_RECNUM
+          value_time_column: D_INDDTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+      # --- [4.2] OR-group 2/4: nyfoedte balloon-catheter induction AND preterm AND no PPROM code
+      - standard: or
+        table: ${paths.input_dir_SDS}/nyfoedte.csv
+        match_on: CPRnummer_Barn
+        column: Igangsaettelse_Ballonkateter  # == Initialization_BalloonCatheter
+        operator: "=="
+        value: "Ja"
+      - standard: and
+        table: population
+        match_on: CPR_BARN
+        column: GA
+        operator: <
+        value: ${preterm_cutoff}
+      - custom: and 
+        function: match_value_with_child_cpr_on_birth_id
+        args:
+          value: [DO420, DO422, DO424]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/mor_diagnoser.csv
+          value_column: DiagnoseKode
+          value_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_path: ${paths.input_dir_SDS}/nyfoedte.csv
+          mapping_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_child_cpr_column: CPRnummer_Barn
+      - custom: and 
+        function: match_value_with_child_cpr_on_birth_id
+        args:
+          value: [DO420, DO422, DO424]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/mor_procedurer.csv
+          value_column: ProcedureKode
+          value_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_path: ${paths.input_dir_SDS}/nyfoedte.csv
+          mapping_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_child_cpr_column: CPRnummer_Barn
+      - custom: and 
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args: 
+          value: [DO420, DO422, DO424]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/t_diag.csv
+          value_column: C_DIAG
+          value_id_column: V_RECNUM
+          value_time_column: D_INDDTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+      - custom: and 
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args: 
+          value: [DO420, DO422, DO424]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/t_diag.csv
+          value_column: C_TILDIAG
+          value_id_column: V_RECNUM
+          value_time_column: D_INDDTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+      - custom: and 
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args: 
+          value: [DO420, DO422, DO424]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/t_sksopr.csv
+          value_column: C_TILOPR
+          value_id_column: V_RECNUM
+          value_time_column: D_ODTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+      # --- [4.3] OR-group 3/4: nyfoedte medical induction AND preterm AND no PPROM code
+      - standard: or
+        table: ${paths.input_dir_SDS}/nyfoedte.csv
+        match_on: CPRnummer_Barn
+        column: Igangsaettelse_Medicinsk
+        operator: "=="
+        value: "Ja"
+      - standard: and
+        table: population
+        match_on: CPR_BARN
+        column: GA
+        operator: <
+        value: ${preterm_cutoff}
+      - custom: and 
+        function: match_value_with_child_cpr_on_birth_id
+        args:
+          value: [DO420, DO422, DO424]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/mor_diagnoser.csv
+          value_column: DiagnoseKode
+          value_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_path: ${paths.input_dir_SDS}/nyfoedte.csv
+          mapping_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_child_cpr_column: CPRnummer_Barn
+      - custom: and 
+        function: match_value_with_child_cpr_on_birth_id
+        args:
+          value: [DO420, DO422, DO424]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/mor_procedurer.csv
+          value_column: ProcedureKode
+          value_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_path: ${paths.input_dir_SDS}/nyfoedte.csv
+          mapping_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_child_cpr_column: CPRnummer_Barn
+      - custom: and 
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args: 
+          value: [DO420, DO422, DO424]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/t_diag.csv
+          value_column: C_DIAG
+          value_id_column: V_RECNUM
+          value_time_column: D_INDDTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+      - custom: and 
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args: 
+          value: [DO420, DO422, DO424]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/t_diag.csv
+          value_column: C_TILDIAG
+          value_id_column: V_RECNUM
+          value_time_column: D_INDDTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+      - custom: and 
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args: 
+          value: [DO420, DO422, DO424]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/t_sksopr.csv
+          value_column: C_TILOPR
+          value_id_column: V_RECNUM
+          value_time_column: D_ODTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+      # --- [4.4] OR-group 4/4: nyfoedte HSP induction AND preterm AND no PPROM code
+      - standard: or
+        table: ${paths.input_dir_SDS}/nyfoedte.csv
+        match_on: CPRnummer_Barn
+        column: Igangsaettelse_HSP
+        operator: "=="
+        value: "Ja"
+      - standard: and
+        table: population
+        match_on: CPR_BARN
+        column: GA
+        operator: <
+        value: ${preterm_cutoff}
+      - custom: and 
+        function: match_value_with_child_cpr_on_birth_id
+        args:
+          value: [DO420, DO422, DO424]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/mor_diagnoser.csv
+          value_column: DiagnoseKode
+          value_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_path: ${paths.input_dir_SDS}/nyfoedte.csv
+          mapping_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_child_cpr_column: CPRnummer_Barn
+      - custom: and 
+        function: match_value_with_child_cpr_on_birth_id
+        args:
+          value: [DO420, DO422, DO424]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/mor_procedurer.csv
+          value_column: ProcedureKode
+          value_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_path: ${paths.input_dir_SDS}/nyfoedte.csv
+          mapping_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_child_cpr_column: CPRnummer_Barn
+      - custom: and 
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args: 
+          value: [DO420, DO422, DO424]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/t_diag.csv
+          value_column: C_DIAG
+          value_id_column: V_RECNUM
+          value_time_column: D_INDDTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+      - custom: and 
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args: 
+          value: [DO420, DO422, DO424]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/t_diag.csv
+          value_column: C_TILDIAG
+          value_id_column: V_RECNUM
+          value_time_column: D_INDDTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+      - custom: and 
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args: 
+          value: [DO420, DO422, DO424]
+          operator: [not_in, all]
+          value_table_path: ${paths.input_dir_SDS}/t_sksopr.csv
+          value_column: C_TILOPR
+          value_id_column: V_RECNUM
+          value_time_column: D_ODTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+  # ======================================================================================
+  # CRITERION 5/7: No multiple births  (2 OR-groups, action: exclude)
+  # ======================================================================================
+  # Remove multiple births (twins etc.)
+  - action: exclude
+    conditions:
+      # --- [5.1] OR-group 1/2: nyfoedte: twins (shared DW_EK_Foedsel + mother)
+      - custom:
+        function: find_duplicated_ids
+        args: 
+          table: ${paths.input_dir_SDS}/nyfoedte.csv
+          match_on: CPRnummer_Barn
+          id_columns: 
+          - DW_EK_Foedsel
+          - CPRnummer_Mor
+      # --- [5.2] OR-group 2/2: mfr: twins (shared FOEDSELSLOEBENUMMER + mother)
+      - custom: or
+        function: find_duplicated_ids
+        args: 
+          table: ${paths.input_dir_SDS}/mfr.csv
+          match_on: CPR_BARN
+          id_columns: 
+          - FOEDSELSLOEBENUMMER
+          - CPR_MODER
+  # ======================================================================================
+  # CRITERION 6/7: No cervical cerclage  (4 OR-groups, action: exclude)
+  # ======================================================================================
+  # Excluded if, during the pregnancy (birth date - GA up to birth date), any of these is recorded:
+  #   diagnosis DO343C                  in mor_diagnoser.DiagnoseKode, t_diag.C_DIAG
+  #   procedure KLDD10A, KLDD10B, KMAB00, KMAB01, KLDD20, KMAB03
+  #                                     in mor_procedurer.ProcedureKode, t_sksopr.C_OPR
+  - action: exclude
+    conditions:
+      # --- [6.1] OR-group 1/4: mor_diagnoser DiagnoseKode == DO343C
+      - custom:
+        function: match_value_with_child_cpr_on_birth_id
+        args:
+          value: "DO343C"
+          operator: ["==", any]
+          value_table_path: ${paths.input_dir_SDS}/mor_diagnoser.csv
+          value_column: DiagnoseKode
+          value_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_path: ${paths.input_dir_SDS}/nyfoedte.csv
+          mapping_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_child_cpr_column: CPRnummer_Barn
+      # --- [6.2] OR-group 2/4: t_diag C_DIAG == DO343C
+      - custom: or
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args:
+          value: "DO343C"
+          operator: ["==", any]
+          value_table_path: ${paths.input_dir_SDS}/t_diag.csv
+          value_column: C_DIAG
+          value_id_column: V_RECNUM
+          value_time_column: D_INDDTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+      # --- [6.3] OR-group 3/4: mor_procedurer ProcedureKode in cerclage codes
+      - custom: or
+        function: match_value_with_child_cpr_on_birth_id
+        args:
+          value: [KLDD10A, KLDD10B, KMAB00, KMAB01, KLDD20, KMAB03]
+          operator: [in, any]
+          value_table_path: ${paths.input_dir_SDS}/mor_procedurer.csv
+          value_column: ProcedureKode
+          value_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_path: ${paths.input_dir_SDS}/nyfoedte.csv
+          mapping_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_child_cpr_column: CPRnummer_Barn
+      # --- [6.4] OR-group 4/4: t_sksopr C_OPR in cerclage codes
+      - custom: or
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args:
+          value: [KLDD10A, KLDD10B, KMAB00, KMAB01, KLDD20, KMAB03]
+          operator: [in, any]
+          value_table_path: ${paths.input_dir_SDS}/t_sksopr.csv
+          value_column: C_OPR
+          value_id_column: V_RECNUM
+          value_time_column: D_ODTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+  # ======================================================================================
+  # CRITERION 7/7: No progesterone treatment  (5 OR-groups, action: exclude)
+  # ======================================================================================
+  # Excluded if, during the pregnancy, any of these is recorded:
+  #   prescription with ATC starting G03DA04 (progesterone)   in epikur_1/2/3.atc
+  #   BKHA1 (behandling med progesteron under graviditet)      in t_sksube.C_TILOPR, mor_diagnoser.DiagnoseKode
+  # The epikur column names for the mother ID and the prescription date are set ONCE at the top of
+  # this file (epikur_mother_column, epikur_date_column).
+  - action: exclude
+    conditions:
+      # --- [7.1] OR-group 1/5: epikur_1 atc starts with G03DA04
+      - custom:
+        function: match_value_with_child_cpr_on_birthdate
+        args:
+          value: "G03DA04"
+          operator: [startswith, any]
+          value_table_path: ${paths.input_dir_SDS}/epikur_1.csv
+          value_column: atc
+          value_time_column: ${epikur_date_column}
+          value_mother_cpr_column: ${epikur_mother_column}
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mother_cpr_column: CPR_MOR
+      # --- [7.2] OR-group 2/5: epikur_2 atc starts with G03DA04
+      - custom: or
+        function: match_value_with_child_cpr_on_birthdate
+        args:
+          value: "G03DA04"
+          operator: [startswith, any]
+          value_table_path: ${paths.input_dir_SDS}/epikur_2.csv
+          value_column: atc
+          value_time_column: ${epikur_date_column}
+          value_mother_cpr_column: ${epikur_mother_column}
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mother_cpr_column: CPR_MOR
+      # --- [7.3] OR-group 3/5: epikur_3 atc starts with G03DA04
+      - custom: or
+        function: match_value_with_child_cpr_on_birthdate
+        args:
+          value: "G03DA04"
+          operator: [startswith, any]
+          value_table_path: ${paths.input_dir_SDS}/epikur_3.csv
+          value_column: atc
+          value_time_column: ${epikur_date_column}
+          value_mother_cpr_column: ${epikur_mother_column}
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mother_cpr_column: CPR_MOR
+      # --- [7.4] OR-group 4/5: t_sksube C_TILOPR == BKHA1
+      - custom: or
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
+        args:
+          value: "BKHA1"
+          operator: ["==", any]
+          value_table_path: ${paths.input_dir_SDS}/t_sksube.csv
+          value_column: C_TILOPR
+          value_id_column: V_RECNUM
+          value_time_column: D_ODTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
+      # --- [7.5] OR-group 5/5: mor_diagnoser DiagnoseKode == BKHA1
+      - custom: or
+        function: match_value_with_child_cpr_on_birth_id
+        args:
+          value: "BKHA1"
+          operator: ["==", any]
+          value_table_path: ${paths.input_dir_SDS}/mor_diagnoser.csv
+          value_column: DiagnoseKode
+          value_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_path: ${paths.input_dir_SDS}/nyfoedte.csv
+          mapping_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_child_cpr_column: CPRnummer_Barn
+  # ======================================================================================
+  # CRITERION 8/8: Only first pregnancy (parity 1)  (2 OR-groups, action: exclude)
+  # ======================================================================================
+  # First birth only (nulliparous, i.e. parity 0 before this birth).
+  # In SDS this is coded as 1 (= this is the woman's 1st birth), so anything other than 1 is excluded.
+  # NB: `!=` never matches empty cells, so children with no parity recorded are KEPT; "." is excluded.
+  - action: exclude
+    conditions:
+      # --- [8.1] OR-group 1/2: mfr: PARITET != 1
+      - standard: 
+        table: ${paths.input_dir_SDS}/mfr.csv
+        match_on: CPR_BARN
+        column: PARITET
+        operator: "!="
+        value: "1"
+      # --- [8.2] OR-group 2/2: nyfoedte: Paritet != 1
+      - standard: or
+        table: ${paths.input_dir_SDS}/nyfoedte.csv
+        match_on: CPRnummer_Barn
+        column: Paritet
+        operator: "!="
+        value: "1"
+
+
+######################
+# ALL IMAGES FILTER  #
+######################
+
+imaging_table:
+  table: ${paths.imaging_table}
+  columns:
+    CPR_MOR: phair_hash
+    FILE_PATH: file_path
+    STUDY_DATE: study_date
+    PDX: physical_delta_x
+    PDY: physical_delta_y
+    NO_OCR_FILE_PATH: no_ocr_preprocessed_file_path
+    INSTITUTION_NAME: institution_name
+
+
+#########################
+# CERVIX IMAGES FILTER  #
+#########################
+
+imaging_matching_criteria:
+  # Only images classified as cervix
+  - function: find_images_with_predicted_classes
+    args:
+      table: ${paths.img_sequence_predictions}
+      classes: [1]
+      image_path_column: file_path
+      class_column: is_cervix
+      population_image_path_column: ${population.file_path_key}
