@@ -342,6 +342,114 @@ def find_images_with_predicted_classes(
     return population, discard_stats
 
 
+def _parse_date(column):
+    """Text or date column -> Date. Accepts 2019-03-01, 2019-03-01 10:00:00, 20190301 and 01MAR2019."""
+    c = pl.col(column).cast(pl.String).str.strip_chars()
+    return pl.coalesce(
+        c.str.slice(0, 10).str.to_date("%Y-%m-%d", strict=False),
+        c.str.to_date("%Y%m%d", strict=False),
+        c.str.to_date("%d%b%Y", strict=False),
+    )
+
+
+def find_images_before_event(
+    sources,
+    population,
+    population_key_column,
+    keep_same_day=False,
+    study_date_column="STUDY_DATE",
+    birthday_column="BIRTHDAY",
+    ga_column="GA",
+    mother_column="CPR_MOR",
+    event_name="event",
+):
+    """Keep only the images taken BEFORE an event (e.g. a cervical cerclage) in the same pregnancy.
+
+    For every child (pregnancy) the events are collected from `sources` (a list of dicts):
+      table, code_column, codes, operator (in | == | startswith | startswith_any, default in)
+      link: "lpr"      -> id_column (V_RECNUM), mapping_table (t_adm), mapping_id_column (K_RECNUM),
+                          mapping_mother_column (V_CPR); events are matched to the mother's pregnancy
+                          by date: pregnancy start - lookback_days <= event date <= birth date
+            "birth_id" -> birth_id_column (DW_EK_Foedsel), mapping_table (nyfoedte), mapping_birth_id_column,
+                          mapping_child_column (CPRnummer_Barn)
+      date_column:       column with the event date (None/omitted = the source has no date)
+      date_is_placement: true  -> the date is the moment the event started (e.g. cerclage placement)
+                         false -> the date is not the start (e.g. removal of the stitch, an admission date)
+      lookback_days:     (lpr only) also count events up to this many days BEFORE the pregnancy started
+                         (e.g. an abdominal cerclage placed before the pregnancy), default 0
+    Per pregnancy:
+      - with >= 1 dated placement event: keep only images taken before the EARLIEST placement date
+        (images on the same day are removed unless keep_same_day is true)
+      - with events but no dated placement event: ALL images of that pregnancy are removed
+        (there was an event, but it is unknown when it started)
+      - without events: all images are kept
+    """
+    discard_stats = {"n_population_before_discard": len(population)}
+    children = (population.select([population_key_column, mother_column, birthday_column, ga_column])
+                          .unique(subset=population_key_column)
+                          .with_columns(_parse_date(birthday_column).alias("_birth"),
+                                        pl.col(ga_column).cast(pl.String).cast(pl.Float64, strict=False).alias("_ga"))
+                          .with_columns((pl.col("_birth") - pl.duration(days=pl.col("_ga"))).alias("_start")))
+    events = []
+    for src in sources:
+        src = dict(src)
+        op = get_python_operator(src.get("operator", "in"))
+        date_col = src.get("date_column")
+        placement = bool(src.get("date_is_placement", True)) and date_col is not None
+        cols = [src["code_column"]] + ([date_col] if date_col else [])
+        codes = list(src["codes"]) if not isinstance(src["codes"], str) else src["codes"]
+        if src["link"] == "lpr":
+            table = load_table(src["table"], columns=cols + [src["id_column"]])
+            table = table.filter(op(pl.col(src["code_column"]), codes))
+            mapping = load_table(src["mapping_table"], columns=[src["mapping_id_column"], src["mapping_mother_column"]])
+            table = table.join(mapping, left_on=src["id_column"], right_on=src["mapping_id_column"])
+            table = table.with_columns((_parse_date(date_col) if date_col else pl.lit(None, pl.Date)).alias("_date"))
+            table = table.join(children, left_on=src["mapping_mother_column"], right_on=mother_column)
+            lookback = pl.duration(days=int(src.get("lookback_days", 0)))
+            table = table.filter((pl.col("_date") >= pl.col("_start") - lookback) & (pl.col("_date") <= pl.col("_birth")))
+            child_col = population_key_column
+        elif src["link"] == "birth_id":
+            table = load_table(src["table"], columns=cols + [src["birth_id_column"]])
+            table = table.filter(op(pl.col(src["code_column"]), codes))
+            mapping = load_table(src["mapping_table"], columns=[src["mapping_birth_id_column"], src["mapping_child_column"]])
+            table = table.join(mapping, left_on=src["birth_id_column"], right_on=src["mapping_birth_id_column"])
+            table = table.with_columns((_parse_date(date_col) if date_col else pl.lit(None, pl.Date)).alias("_date"))
+            child_col = src["mapping_child_column"]
+        else:
+            raise ValueError(f"find_images_before_event: unknown link '{src['link']}' (use 'lpr' or 'birth_id')")
+        logging.info(f"{event_name}: {table.select(child_col).n_unique()} children with an event in "
+                     f"{src['table']} ({src['code_column']})")
+        events.append(table.select(pl.col(child_col).cast(pl.String).alias("_child"), pl.col("_date"),
+                                   pl.lit(placement).alias("_placement")))
+
+    schema = {"_child": pl.String, "_date": pl.Date, "_placement": pl.Boolean}
+    per_child = pl.concat(events) if events else pl.DataFrame(schema=schema)
+    per_child = per_child.filter(pl.col("_child").is_in(children[population_key_column].cast(pl.String).implode()))
+    per_child = per_child.group_by("_child").agg(
+        pl.col("_date").filter(pl.col("_placement") & pl.col("_date").is_not_null()).min().alias("_first_placement"))
+
+    scan = _parse_date(study_date_column)
+    before = (scan <= pl.col("_first_placement")) if keep_same_day else (scan < pl.col("_first_placement"))
+    population = population.with_columns(pl.col(population_key_column).cast(pl.String).alias("_child"))
+    population = population.join(per_child, on="_child", how="left")
+    no_event = ~pl.col("_child").is_in(per_child["_child"].implode())
+    population = population.filter(no_event | (pl.col("_first_placement").is_not_null() & before))
+    population = population.drop(["_child", "_first_placement"])
+
+    n_children = per_child.height
+    n_undated = per_child.filter(pl.col("_first_placement").is_null()).height
+    logging.info(f"{event_name}: {n_children} children in the population had an event; {n_undated} of them without a "
+                 f"dated placement (all their images removed); the others keep only images before the event")
+    discard_stats.update(
+        {
+            "criteria": f"find_images_before_event ({event_name})",
+            "discards": {"children_with_event": n_children, "children_without_dated_placement": n_undated},
+            "n_discards": discard_stats["n_population_before_discard"] - len(population),
+        }
+    )
+    return population, discard_stats
+
+
 def find_close_births(
     value,
     operator,
