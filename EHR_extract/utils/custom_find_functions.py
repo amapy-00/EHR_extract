@@ -381,12 +381,17 @@ def find_close_births(
     return siblings_to_exclude
 
 
-def find_duplicated_ids(table, match_on, id_columns, population, population_key_column):
+def find_duplicated_ids(table, match_on, id_columns, population, population_key_column, min_count=2):
+    """IDs (match_on, e.g. the child CPR) whose group in id_columns (e.g. birth ID + mother) contains at least
+    min_count different IDs. min_count=2 (default): every multiple birth (twins, triplets, ...), same as before.
+    min_count=3: only triplets or more (twins are NOT returned)."""
     population = set(population.get_column(population_key_column))
     table_path = table
     table = load_table(table, columns=[match_on, id_columns])
     logging.debug(f"Table rows total: {len(table)} for table: {table_path}")
-    duplicated_ids = table.filter(table[id_columns].is_duplicated())
+    id_columns = [id_columns] if isinstance(id_columns, str) else list(id_columns)
+    table = table.filter(pl.all_horizontal([pl.col(c).is_not_null() for c in id_columns]))
+    duplicated_ids = table.filter(pl.col(match_on).n_unique().over(id_columns) >= min_count)
     duplicated_ids = duplicated_ids.filter(pl.col(match_on).rechunk().is_in(population))
     logging.debug(
         f"Table rows / unique IDs matching population IDs: {len(table)} / {table[match_on].n_unique()} \

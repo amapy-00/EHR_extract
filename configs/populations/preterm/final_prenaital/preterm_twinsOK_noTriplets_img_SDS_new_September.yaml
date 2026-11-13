@@ -1,24 +1,20 @@
 # =====================================================================================
-# preterm_noMP_37_img_cervix_SDS        (DATASET: new_September)
-# Whole cohort in ONE run - gives the same result as the step chain
-#   steps_SDS_7_progesterone_new_September -> steps_SDS_img_7_progesterone_new_September
-#   -> steps_SDS_img_cervix_7_progesterone_new_September
+# preterm_twinsOK_noTriplets_img_SDS_new_September          (DATASET: new_September)
+# One-run extraction. Population: children in mfr + nyfoedte, paired with the mother's ultrasound images.
 # Criteria (in this order):
-#   1. GA available at birth
+#   1. GA available at birth  (together with the image pairing this gives GA AT SCAN for every image:
+#      GA at scan = GA at birth - (birth date - study date))
 #   2. Only live births
-#   3. No iatrogenic preterm C-section
-#   4. No iatrogenic preterm induction
-#   5. No multiple births
-#   6. No cervical cerclage
-#   7. No progesterone treatment
-# Then: pair every child with the mother's ultrasound images taken during the pregnancy
-#       (mother ID = phair_hash), and keep only images classified as cervix.
-# NOT applied here (despite "16to32" in the name): no GA-at-birth or GA-at-scan filter, and no
-# parity criterion - exactly like the step chain. GA filtering is done afterwards (check_image_files.py).
-# Results:  /home/am/Documents/output_cohort/filtering_steps_SDS/new_September/
-#           preterm_noMP_37_img_cervix_SDS_population_train_and_test.csv  (one row per child-image)
-#           preterm_noMP_37_img_cervix_SDS_discards                         (counts per criterion)
-# Run: python EHR_extract/extract.py --config-name preterm_noMP_37_img_cervix_SDS
+#   3. No iatrogenic PRETERM C-section    (exemptions: PPROM / preterm labour / intrapartum C-section codes)
+#   4. No iatrogenic PRETERM induction    (exemption: PPROM codes)
+#   5. No cervical cerclage               (whole pregnancy; date exception NOT implemented - see criterion 5)
+#   6. No triplets or more                (singletons AND TWINS are kept)
+# Changes vs the earlier cohorts: no parity criterion, no progesterone criterion, twins are kept.
+# Then: every child is paired with all of the mother's images taken during the pregnancy
+#       (birth date - GA up to birth date); mother ID in the image database = phair_hash.
+#       Twins share the mother's images: each image appears once per twin (one row per child-image).
+# Requires: find_duplicated_ids with min_count (find_duplicated_ids_min_count.patch) - criterion 6.
+# Run: python EHR_extract/extract.py --config-name preterm_twinsOK_noTriplets_img_SDS_new_September
 # =====================================================================================
 # @package _global_
 defaults:
@@ -27,10 +23,11 @@ defaults:
 
 paths:
   input_dir_SDS: /home/am/data/raw/sds
-  output_dir: /home/am/Documents/output_cohort/final_prenaital/${hydra:job.config_name}
-  population_save_path: /home/am/Documents/output_cohort/final_prenaital/${hydra:job.config_name}_population
-  discards_save_path: /home/am/Documents/output_cohort/final_prenaital/${hydra:job.config_name}_discards
-  holdout_csv: 
+  output_dir: /home/am/Documents/output_cohort/filtering_steps_SDS/new_September/${hydra:job.config_name}
+  population_save_path: /home/am/Documents/final_population/${hydra:job.config_name}_population
+  discards_save_path: /home/am/Documents/final_population/${hydra:job.config_name}_discards
+  holdout_csv:   # test-split file (one column CPR_MOR) to also write _train.csv / _test.csv, e.g.
+                 # /projects/users/data/UCPH/DeepFetal/projects/common/splits/split_V4/test_split_0.15_2026-06-08.csv
   imaging_table: /home/am/Documents/DeepFetalCSVs/new_September/DeepFetal_image_database_090926_joined_on_sop_instance_uid_and_xx-file_hash.csv
   img_sequence_predictions: /home/am/data/raw/research_common/cervix_preds_v3.csv
 
@@ -56,14 +53,9 @@ population:
         GA: Gestationsalder
         BIRTHDAY: FoedselsDato_Barn
 
-# Prescription register (epikur_1/2/3.csv) - column names used by the progesterone criterion.
-# Check them with:  head -1 /home/am/data/raw/sds/epikur_1.csv
-epikur_mother_column: cpr      # mother's pseudonymised CPR (same IDs as CPR_MODER / CPRnummer_Mor)
-epikur_date_column: eksd       # date the prescription was dispensed (format YYYY-MM-DD)
-
 conditional_criteria:
   # ======================================================================================
-  # CRITERION 1/7: GA available at birth  (1 OR-group, action: exclude)
+  # CRITERION 1/6: GA available at birth  (1 OR-group, action: exclude)
   # ======================================================================================
   # GA available at birth
   - action: exclude
@@ -76,7 +68,7 @@ conditional_criteria:
         operator: "missing"
         value: 
   # ======================================================================================
-  # CRITERION 2/7: Only live births  (2 OR-groups, action: exclude)
+  # CRITERION 2/6: Only live births  (2 OR-groups, action: exclude)
   # ======================================================================================
   # Only live birth (no SP)
   - action: exclude
@@ -96,7 +88,7 @@ conditional_criteria:
         operator: "!="
         value: "1"
   # ======================================================================================
-  # CRITERION 3/7: No iatrogenic preterm C-section  (3 OR-groups, action: exclude)
+  # CRITERION 3/6: No iatrogenic preterm C-section  (3 OR-groups, action: exclude)
   # ======================================================================================
   # No C-section/kejsersnit unless PPROM or Contractions or C-section during birth
   - action: exclude
@@ -365,7 +357,7 @@ conditional_criteria:
           population_child_cpr_column: CPR_BARN
           population_mom_cpr_column: CPR_MOR
   # ======================================================================================
-  # CRITERION 4/7: No iatrogenic preterm induction  (4 OR-groups, action: exclude)
+  # CRITERION 4/6: No iatrogenic preterm induction  (4 OR-groups, action: exclude)
   # ======================================================================================
   # Not induced 
   - action: exclude
@@ -671,39 +663,19 @@ conditional_criteria:
           population_child_cpr_column: CPR_BARN
           population_mom_cpr_column: CPR_MOR
   # ======================================================================================
-  # CRITERION 5/7: No multiple births  (2 OR-groups, action: exclude)
+  # CRITERION 5/6: No cervical cerclage  (4 OR-groups, action: exclude)
   # ======================================================================================
-  # Remove multiple births (twins etc.)
-  - action: exclude
-    conditions:
-      # --- [5.1] OR-group 1/2: nyfoedte: twins (shared DW_EK_Foedsel + mother)
-      - custom:
-        function: find_duplicated_ids
-        args: 
-          table: ${paths.input_dir_SDS}/nyfoedte.csv
-          match_on: CPRnummer_Barn
-          id_columns: 
-          - DW_EK_Foedsel
-          - CPRnummer_Mor
-      # --- [5.2] OR-group 2/2: mfr: twins (shared FOEDSELSLOEBENUMMER + mother)
-      - custom: or
-        function: find_duplicated_ids
-        args: 
-          table: ${paths.input_dir_SDS}/mfr.csv
-          match_on: CPR_BARN
-          id_columns: 
-          - FOEDSELSLOEBENUMMER
-          - CPR_MODER
-  # ======================================================================================
-  # CRITERION 6/7: No cervical cerclage  (4 OR-groups, action: exclude)
-  # ======================================================================================
-  # Excluded if, during the pregnancy (birth date - GA up to birth date), any of these is recorded:
+  # Excluded if any of these is recorded for the pregnancy (LPR sources: birth date - GA up to birth date;
+  # mor_* sources: linked to the birth through DW_EK_Foedsel):
+  # NOTE: this excludes the whole pregnancy, whatever the DATE of the cerclage. The exception
+  # "unless performed before image acquisition" needs an image-level date comparison that the
+  # pipeline does not have yet - see the explanation that came with this file.
   #   diagnosis DO343C                  in mor_diagnoser.DiagnoseKode, t_diag.C_DIAG
   #   procedure KLDD10A, KLDD10B, KMAB00, KMAB01, KLDD20, KMAB03
   #                                     in mor_procedurer.ProcedureKode, t_sksopr.C_OPR
   - action: exclude
     conditions:
-      # --- [6.1] OR-group 1/4: mor_diagnoser DiagnoseKode == DO343C
+      # --- [5.1] OR-group 1/4: mor_diagnoser DiagnoseKode == DO343C
       - custom:
         function: match_value_with_child_cpr_on_birth_id
         args:
@@ -715,7 +687,7 @@ conditional_criteria:
           mapping_table_path: ${paths.input_dir_SDS}/nyfoedte.csv
           mapping_table_birth_id_column: DW_EK_Foedsel
           mapping_table_child_cpr_column: CPRnummer_Barn
-      # --- [6.2] OR-group 2/4: t_diag C_DIAG == DO343C
+      # --- [5.2] OR-group 2/4: t_diag C_DIAG == DO343C
       - custom: or
         function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
         args:
@@ -732,7 +704,7 @@ conditional_criteria:
           population_gestational_age_column: GA
           population_child_cpr_column: CPR_BARN
           population_mom_cpr_column: CPR_MOR
-      # --- [6.3] OR-group 3/4: mor_procedurer ProcedureKode in cerclage codes
+      # --- [5.3] OR-group 3/4: mor_procedurer ProcedureKode in cerclage codes
       - custom: or
         function: match_value_with_child_cpr_on_birth_id
         args:
@@ -744,7 +716,7 @@ conditional_criteria:
           mapping_table_path: ${paths.input_dir_SDS}/nyfoedte.csv
           mapping_table_birth_id_column: DW_EK_Foedsel
           mapping_table_child_cpr_column: CPRnummer_Barn
-      # --- [6.4] OR-group 4/4: t_sksopr C_OPR in cerclage codes
+      # --- [5.4] OR-group 4/4: t_sksopr C_OPR in cerclage codes
       - custom: or
         function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
         args:
@@ -762,67 +734,60 @@ conditional_criteria:
           population_child_cpr_column: CPR_BARN
           population_mom_cpr_column: CPR_MOR
   # ======================================================================================
-  # CRITERION 7/7: No progesterone treatment  (5 OR-groups, action: exclude)
+  # CRITERION 6/6: No triplets or higher-order multiples (twins and singletons are KEPT)  (5 OR-groups, action: exclude)
   # ======================================================================================
-  # Excluded if, during the pregnancy, any of these is recorded:
-  #   prescription with ATC starting G03DA04 (progesterone)   in epikur_1/2/3.atc
-  #   BKHA1 (behandling med progesteron under graviditet)      in t_sksube.C_TILOPR, mor_diagnoser.DiagnoseKode
-  # The epikur column names for the mother ID and the prescription date are set ONCE at the top of
-  # this file (epikur_mother_column, epikur_date_column).
+  # A birth is excluded if ANY of these sources shows 3 or more babies:
+  #   - 3 or more newborns registered for the same birth (count of children per birth):
+  #       nyfoedte: same DW_EK_Foedsel + mother        mfr: same FOEDSELSLOEBENUMMER + mother
+  #     (needs min_count in find_duplicated_ids - see find_duplicated_ids_min_count.patch)
+  #   - an ICD-10 code for a triplet+ pregnancy or delivery, in mor_diagnoser or LPR (t_diag) during the pregnancy:
+  #       DO301 triplet pregnancy, DO302 quadruplet pregnancy, DO308 other multiple gestation (3+),
+  #       DZ375 / DZ376 / DZ377 outcome of delivery: other multiple births (3+) all / some / none liveborn
+  #     (DO300 twin pregnancy and DZ372-DZ374 twin outcomes are NOT in the list: twins are kept)
   - action: exclude
     conditions:
-      # --- [7.1] OR-group 1/5: epikur_1 atc starts with G03DA04
+      # --- [6.1] OR-group 1/5: nyfoedte: >= 3 children registered for the same birth
       - custom:
-        function: match_value_with_child_cpr_on_birthdate
+        function: find_duplicated_ids
         args:
-          value: "G03DA04"
-          operator: [startswith, any]
-          value_table_path: ${paths.input_dir_SDS}/epikur_1.csv
-          value_column: atc
-          value_time_column: ${epikur_date_column}
-          value_mother_cpr_column: ${epikur_mother_column}
-          population_birth_column: BIRTHDAY
-          population_gestational_age_column: GA
-          population_child_cpr_column: CPR_BARN
-          population_mother_cpr_column: CPR_MOR
-      # --- [7.2] OR-group 2/5: epikur_2 atc starts with G03DA04
+          table: ${paths.input_dir_SDS}/nyfoedte.csv
+          match_on: CPRnummer_Barn
+          id_columns:
+          - DW_EK_Foedsel
+          - CPRnummer_Mor
+          min_count: 3
+      # --- [6.2] OR-group 2/5: mfr: >= 3 children registered for the same birth
       - custom: or
-        function: match_value_with_child_cpr_on_birthdate
+        function: find_duplicated_ids
         args:
-          value: "G03DA04"
-          operator: [startswith, any]
-          value_table_path: ${paths.input_dir_SDS}/epikur_2.csv
-          value_column: atc
-          value_time_column: ${epikur_date_column}
-          value_mother_cpr_column: ${epikur_mother_column}
-          population_birth_column: BIRTHDAY
-          population_gestational_age_column: GA
-          population_child_cpr_column: CPR_BARN
-          population_mother_cpr_column: CPR_MOR
-      # --- [7.3] OR-group 3/5: epikur_3 atc starts with G03DA04
+          table: ${paths.input_dir_SDS}/mfr.csv
+          match_on: CPR_BARN
+          id_columns:
+          - FOEDSELSLOEBENUMMER
+          - CPR_MODER
+          min_count: 3
+      # --- [6.3] OR-group 3/5: mor_diagnoser: triplet+ diagnosis linked to the birth
       - custom: or
-        function: match_value_with_child_cpr_on_birthdate
+        function: match_value_with_child_cpr_on_birth_id
         args:
-          value: "G03DA04"
-          operator: [startswith, any]
-          value_table_path: ${paths.input_dir_SDS}/epikur_3.csv
-          value_column: atc
-          value_time_column: ${epikur_date_column}
-          value_mother_cpr_column: ${epikur_mother_column}
-          population_birth_column: BIRTHDAY
-          population_gestational_age_column: GA
-          population_child_cpr_column: CPR_BARN
-          population_mother_cpr_column: CPR_MOR
-      # --- [7.4] OR-group 4/5: t_sksube C_TILOPR == BKHA1
+          value: [DO301, DO302, DO308, DZ375, DZ376, DZ377]
+          operator: [in, any]
+          value_table_path: ${paths.input_dir_SDS}/mor_diagnoser.csv
+          value_column: DiagnoseKode
+          value_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_path: ${paths.input_dir_SDS}/nyfoedte.csv
+          mapping_table_birth_id_column: DW_EK_Foedsel
+          mapping_table_child_cpr_column: CPRnummer_Barn
+      # --- [6.4] OR-group 4/5: LPR diagnosis: triplet+ code during the pregnancy
       - custom: or
         function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
         args:
-          value: "BKHA1"
-          operator: ["==", any]
-          value_table_path: ${paths.input_dir_SDS}/t_sksube.csv
-          value_column: C_TILOPR
+          value: [DO301, DO302, DO308, DZ375, DZ376, DZ377]
+          operator: [in, any]
+          value_table_path: ${paths.input_dir_SDS}/t_diag.csv
+          value_column: C_DIAG
           value_id_column: V_RECNUM
-          value_time_column: D_ODTO
+          value_time_column: D_INDDTO
           mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
           mapping_table_id_column: K_RECNUM
           mapping_table_mom_cpr_column: V_CPR
@@ -830,23 +795,23 @@ conditional_criteria:
           population_gestational_age_column: GA
           population_child_cpr_column: CPR_BARN
           population_mom_cpr_column: CPR_MOR
-      # --- [7.5] OR-group 5/5: mor_diagnoser DiagnoseKode == BKHA1
+      # --- [6.5] OR-group 5/5: LPR additional diagnosis: triplet+ code during the pregnancy
       - custom: or
-        function: match_value_with_child_cpr_on_birth_id
+        function: match_value_with_child_cpr_on_lpr_id_to_mom_cpr_to_birthdate
         args:
-          value: "BKHA1"
-          operator: ["==", any]
-          value_table_path: ${paths.input_dir_SDS}/mor_diagnoser.csv
-          value_column: DiagnoseKode
-          value_table_birth_id_column: DW_EK_Foedsel
-          mapping_table_path: ${paths.input_dir_SDS}/nyfoedte.csv
-          mapping_table_birth_id_column: DW_EK_Foedsel
-          mapping_table_child_cpr_column: CPRnummer_Barn
-
-
-######################
-# ALL IMAGES FILTER  #
-######################
+          value: [DO301, DO302, DO308, DZ375, DZ376, DZ377]
+          operator: [in, any]
+          value_table_path: ${paths.input_dir_SDS}/t_diag.csv
+          value_column: C_TILDIAG
+          value_id_column: V_RECNUM
+          value_time_column: D_INDDTO
+          mapping_table_path: ${paths.input_dir_SDS}/t_adm.csv
+          mapping_table_id_column: K_RECNUM
+          mapping_table_mom_cpr_column: V_CPR
+          population_birth_column: BIRTHDAY
+          population_gestational_age_column: GA
+          population_child_cpr_column: CPR_BARN
+          population_mom_cpr_column: CPR_MOR
 
 imaging_table:
   table: ${paths.imaging_table}
@@ -860,12 +825,7 @@ imaging_table:
     INSTITUTION_NAME: institution_name
 
 
-#########################
-# CERVIX IMAGES FILTER  #
-#########################
-
 imaging_matching_criteria:
-  # Only images classified as cervix
   - function: find_images_with_predicted_classes
     args:
       table: ${paths.img_sequence_predictions}
