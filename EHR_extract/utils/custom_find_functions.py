@@ -352,6 +352,30 @@ def _parse_date(column):
     )
 
 
+def _load_event_table(src, columns):
+    """The table with the event codes. The date column may be missing here (then it is taken from the
+    mapping table, e.g. LPR2: D_INDDTO is in t_adm, not in t_diag)."""
+    table = load_table(src["table"], columns=columns)
+    for c in (src["code_column"], columns[-1]):
+        if c not in table.columns:
+            raise ValueError(f"find_images_before_event: column '{c}' not found in {src['table']}. "
+                             f"Columns: {pl.read_csv(src['table'], n_rows=0).columns}")
+    return table
+
+
+def _load_mapping_table(src, columns, date_col, event_table):
+    """The linking table (t_adm / nyfoedte); also reads the date column when the event table does not have it."""
+    if date_col and date_col not in event_table.columns:
+        columns = columns + [date_col]
+    return load_table(src["mapping_table"], columns=columns)
+
+
+def _check_date_column(src, date_col, table):
+    if date_col and date_col not in table.columns:
+        raise ValueError(f"find_images_before_event: date column '{date_col}' found neither in {src['table']} "
+                         f"nor in {src['mapping_table']}. Check date_column in the YAML.")
+
+
 def find_images_before_event(
     sources,
     population,
@@ -399,20 +423,22 @@ def find_images_before_event(
         cols = [src["code_column"]] + ([date_col] if date_col else [])
         codes = list(src["codes"]) if not isinstance(src["codes"], str) else src["codes"]
         if src["link"] == "lpr":
-            table = load_table(src["table"], columns=cols + [src["id_column"]])
+            table = _load_event_table(src, cols + [src["id_column"]])
             table = table.filter(op(pl.col(src["code_column"]), codes))
-            mapping = load_table(src["mapping_table"], columns=[src["mapping_id_column"], src["mapping_mother_column"]])
+            mapping = _load_mapping_table(src, [src["mapping_id_column"], src["mapping_mother_column"]], date_col, table)
             table = table.join(mapping, left_on=src["id_column"], right_on=src["mapping_id_column"])
+            _check_date_column(src, date_col, table)
             table = table.with_columns((_parse_date(date_col) if date_col else pl.lit(None, pl.Date)).alias("_date"))
             table = table.join(children, left_on=src["mapping_mother_column"], right_on=mother_column)
             lookback = pl.duration(days=int(src.get("lookback_days", 0)))
             table = table.filter((pl.col("_date") >= pl.col("_start") - lookback) & (pl.col("_date") <= pl.col("_birth")))
             child_col = population_key_column
         elif src["link"] == "birth_id":
-            table = load_table(src["table"], columns=cols + [src["birth_id_column"]])
+            table = _load_event_table(src, cols + [src["birth_id_column"]])
             table = table.filter(op(pl.col(src["code_column"]), codes))
-            mapping = load_table(src["mapping_table"], columns=[src["mapping_birth_id_column"], src["mapping_child_column"]])
+            mapping = _load_mapping_table(src, [src["mapping_birth_id_column"], src["mapping_child_column"]], date_col, table)
             table = table.join(mapping, left_on=src["birth_id_column"], right_on=src["mapping_birth_id_column"])
+            _check_date_column(src, date_col, table)
             table = table.with_columns((_parse_date(date_col) if date_col else pl.lit(None, pl.Date)).alias("_date"))
             child_col = src["mapping_child_column"]
         else:
