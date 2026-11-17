@@ -805,10 +805,10 @@ imaging_matching_criteria:
 
   # Optional: keep only images the cervix classifier labels as cervix (not part of the stated requirements).
   # Remove the "#" in front of the 7 lines below to switch it on.
-#   - function: find_images_with_predicted_classes
-#     args:
-#       table: ${paths.img_sequence_predictions}
-#       classes: [1]
-#       image_path_column: file_path
-#       class_column: is_cervix
-#       population_image_path_column: ${population.file_path_key}
+  - function: find_images_with_predicted_classes
+    args:
+      table: ${paths.img_sequence_predictions}
+      classes: [1]
+      image_path_column: file_path
+      class_column: is_cervix
+      population_image_path_column: ${population.file_path_key}
