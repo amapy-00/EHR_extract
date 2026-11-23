@@ -1,20 +1,26 @@
 # =====================================================================================
 # preterm_twinsOK_noTriplets_img_SDS_new_September          (DATASET: new_September)
-# One-run extraction. Population: children in mfr + nyfoedte, paired with the mother's ultrasound images.
-# Criteria (in this order):
-#   1. GA available at birth  (together with the image pairing this gives GA AT SCAN for every image:
-#      GA at scan = GA at birth - (birth date - study date))
+# FINAL POPULATION in one run: every requirement is applied here; the output CSV has a "label" column.
+#   positive = born at GA <= 32+0 weeks (224 days)      negative = born at GA >= 32+1 weeks (225 days)
+# Criteria (children, in this order):
+#   1. GA available at birth
 #   2. Only live births
 #   3. No iatrogenic PRETERM C-section    (exemptions: PPROM / preterm labour / intrapartum C-section codes)
 #   4. No iatrogenic PRETERM induction    (exemption: PPROM codes)
 #   5. No triplets or more                (singletons AND TWINS are kept)
-# Images: only images taken BEFORE a cervical cerclage (image filter find_images_before_event, at the end)
-# Changes vs the earlier cohorts: no parity criterion, no progesterone criterion, twins are kept.
-# Then: every child is paired with all of the mother's images taken during the pregnancy
-#       (birth date - GA up to birth date); mother ID in the image database = phair_hash.
-#       Twins share the mother's images: each image appears once per twin (one row per child-image).
-# Requires: find_duplicated_ids with min_count (criterion 5) and find_images_before_event (image filter):
-#           both in ehr_extract_new_functions.patch
+#   6. Mother 18 or older at the birth    (age missing or not a number -> excluded)
+#   (optional, switched off: an upper GA-at-birth limit for negatives)
+# Image steps (in this order):
+#   a. GA at scan 16+0 to 31+6 weeks, scan 1-209 days before birth
+#   b. only images taken BEFORE a cervical cerclage
+#   c. only cervix images
+#   d. mother 18 or older ON THE DAY OF THE SCAN (where her birth date is known: nyfoedte)
+#   e. (optional, switched off) only scans from some years
+#   f. twins: an image shared by two twins is kept once
+#   g. label: positive / negative
+# Requires (EHR_extract): find_duplicated_ids with min_count, find_images_before_event,
+#   find_images_with_min_mother_age_at_scan, find_images_in_scan_years, keep_one_row_per_image,
+#   add_label_by_ga_at_birth, and merge_population_tables with diagonal_relaxed.
 # Run: python EHR_extract/extract.py --config-name preterm_twinsOK_noTriplets_img_SDS_new_September
 # =====================================================================================
 # @package _global_
@@ -24,9 +30,9 @@ defaults:
 
 paths:
   input_dir_SDS: /home/am/data/raw/sds
-  output_dir: /home/am/Documents/final_population/${hydra:job.config_name}
-  population_save_path: /home/am/Documents/final_population/${hydra:job.config_name}_population
-  discards_save_path: /home/am/Documents/final_population/${hydra:job.config_name}_discards
+  output_dir: /home/am/Documents/output_cohort/filtering_steps_SDS/new_September/${hydra:job.config_name}
+  population_save_path: /home/am/Documents/output_cohort/filtering_steps_SDS/new_September/${hydra:job.config_name}_population
+  discards_save_path: /home/am/Documents/output_cohort/filtering_steps_SDS/new_September/${hydra:job.config_name}_discards
   holdout_csv:   # test-split file (one column CPR_MOR) to also write _train.csv / _test.csv, e.g.
                  # /projects/users/data/UCPH/DeepFetal/projects/common/splits/split_V4/test_split_0.15_2026-06-08.csv
   imaging_table: /home/am/Documents/DeepFetalCSVs/new_September/DeepFetal_image_database_090926_joined_on_sop_instance_uid_and_xx-file_hash.csv
@@ -47,16 +53,20 @@ population:
         CPR_MOR: CPR_MODER
         GA: GESTATIONSALDER_DAGE
         BIRTHDAY: FOEDSELSDATO
+        MOTHER_AGE: ALDER_MODER            # mother's age at the birth
+                                           # (mfr has no birth date of the mother: MOTHER_BIRTHDAY stays empty)
     - table: ${paths.input_dir_SDS}/nyfoedte.csv
       columns:
         CPR_BARN: CPRnummer_Barn
         CPR_MOR: CPRnummer_Mor
         GA: Gestationsalder
         BIRTHDAY: FoedselsDato_Barn
+        MOTHER_AGE: Alder_Mor              # mother's age at the birth
+        MOTHER_BIRTHDAY: FoedselsDato_Mor  # mother's birth date (for her age on the day of each scan)
 
 conditional_criteria:
   # ======================================================================================
-  # CRITERION 1/5: GA available at birth  (1 OR-group, action: exclude)
+  # CRITERION 1/6: GA available at birth  (1 OR-group, action: exclude)
   # ======================================================================================
   # GA available at birth
   - action: exclude
@@ -69,7 +79,7 @@ conditional_criteria:
         operator: "missing"
         value: 
   # ======================================================================================
-  # CRITERION 2/5: Only live births  (2 OR-groups, action: exclude)
+  # CRITERION 2/6: Only live births  (2 OR-groups, action: exclude)
   # ======================================================================================
   # Only live birth (no SP)
   - action: exclude
@@ -89,7 +99,7 @@ conditional_criteria:
         operator: "!="
         value: "1"
   # ======================================================================================
-  # CRITERION 3/5: No iatrogenic preterm C-section  (3 OR-groups, action: exclude)
+  # CRITERION 3/6: No iatrogenic preterm C-section  (3 OR-groups, action: exclude)
   # ======================================================================================
   # No C-section/kejsersnit unless PPROM or Contractions or C-section during birth
   - action: exclude
@@ -358,7 +368,7 @@ conditional_criteria:
           population_child_cpr_column: CPR_BARN
           population_mom_cpr_column: CPR_MOR
   # ======================================================================================
-  # CRITERION 4/5: No iatrogenic preterm induction  (4 OR-groups, action: exclude)
+  # CRITERION 4/6: No iatrogenic preterm induction  (4 OR-groups, action: exclude)
   # ======================================================================================
   # Not induced 
   - action: exclude
@@ -664,7 +674,7 @@ conditional_criteria:
           population_child_cpr_column: CPR_BARN
           population_mom_cpr_column: CPR_MOR
   # ======================================================================================
-  # CRITERION 5/5: No triplets or higher-order multiples (twins and singletons are KEPT)  (5 OR-groups, action: exclude)
+  # CRITERION 5/6: No triplets or higher-order multiples (twins and singletons are KEPT)  (5 OR-groups, action: exclude)
   # ======================================================================================
   # A birth is excluded if ANY of these sources shows 3 or more babies:
   #   - 3 or more newborns registered for the same birth (count of children per birth):
@@ -742,6 +752,38 @@ conditional_criteria:
           population_gestational_age_column: GA
           population_child_cpr_column: CPR_BARN
           population_mom_cpr_column: CPR_MOR
+  # ======================================================================================
+  # CRITERION 6/6: Mother 18 or older at the birth  (action: INCLUDE - keep only the children that match)
+  # ======================================================================================
+  # MOTHER_AGE is a population column (like GA), so every child has it.
+  # ">=" turns the value into a number first: an EMPTY or non-numeric age is then "no number" and does not
+  # match, so these children are excluded too (just like a mother younger than 18).
+  # (The registers are read as text, so an empty age is an empty text "", which operator "missing" would
+  # NOT catch - this is why the rule is written as "keep >= 18" and not as "exclude missing or < 18".)
+  # NOTE: this is the age AT THE BIRTH. The age ON THE DAY OF THE SCAN is checked by the image step
+  # find_images_with_min_mother_age_at_scan below, where the mother's birth date is known (nyfoedte).
+  - action: include
+    conditions:
+      # --- [6.1] the mother's age at the birth is a number >= 18
+      - standard:
+        table: population
+        match_on: CPR_BARN
+        column: MOTHER_AGE
+        operator: ">="
+        value: 18
+
+  # --------------------------------------------------------------------------------------
+  # OPTIONAL (switched off): upper GA-at-birth limit for the NEGATIVES, e.g. 294 = born before 42+0.
+  # To switch it on, remove the "# " in front of the 8 lines below and set value.
+  # --------------------------------------------------------------------------------------
+  # - action: exclude
+  #   conditions:
+  #     - standard:
+  #       table: population
+  #       match_on: CPR_BARN
+  #       column: GA
+  #       operator: ">"
+  #       value: 294
 
 imaging_table:
   table: ${paths.imaging_table}
@@ -757,7 +799,23 @@ imaging_table:
 
 imaging_matching_criteria:
   # ------------------------------------------------------------------------------------
-  # Only images taken BEFORE a cervical cerclage (same pregnancy). Per pregnancy:
+  # a. GA at scan 16+0 to 31+6 weeks, scan 1-209 days before birth.
+  #    The bounds are STRICT in the code: 111 < GA at scan < 224 keeps 112-223 days (16+0 to 31+6)
+  #    and 0 < days from scan to birth < 210 keeps scans 1-209 days before birth.
+  # ------------------------------------------------------------------------------------
+  - function: find_images_within_time_windows
+    args:
+      scan_date_column: STUDY_DATE
+      image_path_column: ${population.file_path_key}
+      population_delivery_date_column: BIRTHDAY
+      population_ga_in_days_at_delivery_column: GA
+      min_diff_days_scan_to_delivery: 0
+      max_diff_days_scan_to_delivery: 210
+      min_ga_in_days_at_scan: 111
+      max_ga_in_days_at_scan: 224
+
+  # ------------------------------------------------------------------------------------
+  # b. Only images taken BEFORE a cervical cerclage (same pregnancy). Per pregnancy:
   #   - dated cerclage PLACEMENT found -> keep only images taken before the earliest placement date
   #                                       (images on the day of the cerclage are removed)
   #   - cerclage found but no placement date (removal code, diagnosis, or a source without dates)
@@ -803,8 +861,9 @@ imaging_matching_criteria:
            mapping_table: "${paths.input_dir_SDS}/nyfoedte.csv", mapping_birth_id_column: DW_EK_Foedsel,
            mapping_child_column: CPRnummer_Barn}
 
-  # Optional: keep only images the cervix classifier labels as cervix (not part of the stated requirements).
-  # Remove the "#" in front of the 7 lines below to switch it on.
+  # ------------------------------------------------------------------------------------
+  # c. Only images the cervix classifier labels as cervix (is_cervix = 1)
+  # ------------------------------------------------------------------------------------
   - function: find_images_with_predicted_classes
     args:
       table: ${paths.img_sequence_predictions}
@@ -812,3 +871,39 @@ imaging_matching_criteria:
       image_path_column: file_path
       class_column: is_cervix
       population_image_path_column: ${population.file_path_key}
+
+  # ------------------------------------------------------------------------------------
+  # d. Mother 18 or older ON THE DAY OF THE SCAN. Only possible where her birth date is known
+  #    (MOTHER_BIRTHDAY, from nyfoedte); for the other mothers only the age AT BIRTH is known,
+  #    which criterion 6 checked (a mother who was 17 at the scan but 18 at the birth is then not detected).
+  # ------------------------------------------------------------------------------------
+  - function: find_images_with_min_mother_age_at_scan
+    args:
+      min_age: 18
+      mother_birthday_column: MOTHER_BIRTHDAY
+      scan_date_column: STUDY_DATE
+
+  # ------------------------------------------------------------------------------------
+  # e. OPTIONAL: only scans from year_from to year_to (both included). null = no limit = all years.
+  # ------------------------------------------------------------------------------------
+  - function: find_images_in_scan_years
+    args:
+      year_from: null
+      year_to: null
+      scan_date_column: STUDY_DATE
+
+  # ------------------------------------------------------------------------------------
+  # f. Twins share their mother's images: keep every image only once
+  # ------------------------------------------------------------------------------------
+  - function: keep_one_row_per_image
+    args:
+      image_path_column: ${population.file_path_key}
+
+  # ------------------------------------------------------------------------------------
+  # g. Label: positive = born at GA <= 224 days (32+0), negative = born later (>= 32+1). Removes nothing.
+  # ------------------------------------------------------------------------------------
+  - function: add_label_by_ga_at_birth
+    args:
+      positive_max_ga_at_birth: 224
+      ga_column: GA
+      label_column: label

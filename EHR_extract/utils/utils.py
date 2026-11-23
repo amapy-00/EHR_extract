@@ -213,7 +213,7 @@ def merge_population_tables(table_cfgs: list, population, strict=True):
         tab = tab.select(sorted(tab.columns))
         if "GA" in tab.columns:
             tab = filter_numeric_rows(tab, "GA")
-        population = population.vstack(tab)
+        population = pl.concat([population, tab], how="diagonal_relaxed")  # allow population column only found in one register table (used for mother's age at scan time).
     return population
 
 
