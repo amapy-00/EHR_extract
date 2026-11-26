@@ -30,11 +30,11 @@ defaults:
 
 paths:
   input_dir_SDS: /home/am/data/raw/sds
-  output_dir: /home/am/Documents/final_population/comprehensive_yaml/${hydra:job.config_name}
-  population_save_path: /home/am/Documents/final_population/comprehensive_yaml/${hydra:job.config_name}_population
-  discards_save_path: /home/am/Documents/final_population/comprehensive_yaml/${hydra:job.config_name}_discards
-  holdout_csv: /home/am/Documents/splits/split_test_hospitals/test_split_0_2026-11-23.csv
-  imaging_table: /home/am/Documents/DeepFetalCSVs/new_September/DeepFetal_image_database_090926_joined_on_sop_instance_uid_and_xx-file_hash.csv
+  output_dir: /home/am/Documents/final_population/comprehensive_yaml/nov_db/${hydra:job.config_name}
+  population_save_path: /home/am/Documents/final_population/comprehensive_yaml/nov_db/${hydra:job.config_name}_population
+  discards_save_path: /home/am/Documents/final_population/comprehensive_yaml/nov_db/${hydra:job.config_name}_discards
+  holdout_csv: /home/am/Documents/splits/split_test_hospitals/test_split_0_2026-11-26.csv
+  imaging_table: /home/am/Documents/DeepFetalCSVs/111126/DeepFetal_image_database_111126_joined_on_sop_instance_uid.csv
   img_sequence_predictions: /home/am/data/raw/research_common/cervix_preds_v3.csv
 
 strict: True
@@ -787,7 +787,7 @@ conditional_criteria:
 imaging_table:
   table: ${paths.imaging_table}
   columns:
-    CPR_MOR: phair_hash
+    CPR_MOR: file_hash
     FILE_PATH: file_path
     STUDY_DATE: study_date
     PDX: physical_delta_x

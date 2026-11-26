@@ -13,7 +13,7 @@ defaults:
 paths:
   input_dir_SDS: /home/am/data/raw/sds
   output_dir: /home/am/Documents/splits/${hydra:job.config_name}
-  imaging_table: /home/am/Documents/DeepFetalCSVs/new_September/DeepFetal_image_database_090926_joined_on_sop_instance_uid_and_xx-file_hash.csv
+  imaging_table: /home/am/Documents/DeepFetalCSVs/111126/DeepFetal_image_database_111126_joined_on_sop_instance_uid.csv
 
 custom_split_fn: test_hospitals
 
@@ -31,7 +31,7 @@ population:
   imaging_table:
     table: ${paths.imaging_table}
     columns:
-      CPR_MOR: phair_hash
+      CPR_MOR: file_hash
       INSTITUTION_NAME: institution_name
   # hospitals whose mothers go to the TEST set
   test_hospitals:
